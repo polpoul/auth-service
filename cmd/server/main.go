@@ -13,27 +13,26 @@ import (
 	"github.com/joho/godotenv"
 	"github.com/you/auth-service/internal/db"
 	"github.com/you/auth-service/internal/handlers"
-	authmw "github.com/you/auth-service/internal/middleware"
 	"github.com/you/auth-service/internal/mailer"
+	authmw "github.com/you/auth-service/internal/middleware"
 )
 
 func main() {
-	_ = godotenv.Load() // load .env if present (ignored in production)
+	_ = godotenv.Load()
 
-	ctx := context.Background()
-
-	// Database
-	database, err := db.New(ctx, os.Getenv("DATABASE_URL"))
+	// DSN format: user:password@tcp(host:port)/dbname?parseTime=true
+	dsn := os.Getenv("DATABASE_URL")
+	database, err := db.New(dsn)
 	if err != nil {
 		log.Fatalf("failed to connect to database: %v", err)
 	}
-	defer database.Pool.Close()
+	defer database.Close()
 
-	// Background cleanup: inactive devices every 24h
+	// Background cleanup every 24h
 	go func() {
 		ticker := time.NewTicker(24 * time.Hour)
 		for range ticker.C {
-			if err := database.CleanupInactiveDevices(ctx); err != nil {
+			if err := database.CleanupInactiveDevices(context.Background()); err != nil {
 				log.Printf("cleanup error: %v", err)
 			}
 		}
@@ -49,7 +48,7 @@ func main() {
 	r.Use(chimw.Recoverer)
 	r.Use(chimw.RealIP)
 
-	// Health check (used by Render)
+	// Health check
 	r.Get("/health", func(w http.ResponseWriter, r *http.Request) {
 		w.WriteHeader(http.StatusOK)
 		_, _ = w.Write([]byte("ok"))
@@ -57,7 +56,6 @@ func main() {
 
 	// Public routes with rate limiting
 	r.Group(func(r chi.Router) {
-		// 5 requests / minute / IP on auth endpoints
 		r.Use(httprate.LimitByIP(5, time.Minute))
 		r.Post("/auth/request-login", h.RequestLogin)
 		r.Get("/auth/login", h.Login)

@@ -10,8 +10,8 @@ import (
 	"time"
 
 	"github.com/you/auth-service/internal/db"
-	authmw "github.com/you/auth-service/internal/middleware"
 	"github.com/you/auth-service/internal/mailer"
+	authmw "github.com/you/auth-service/internal/middleware"
 	"github.com/you/auth-service/internal/tokens"
 )
 
@@ -42,7 +42,6 @@ func (h *Handler) RequestLogin(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Always respond with same delay to prevent user enumeration
 	start := time.Now()
 	defer func() {
 		elapsed := time.Since(start)
@@ -51,14 +50,12 @@ func (h *Handler) RequestLogin(w http.ResponseWriter, r *http.Request) {
 		}
 	}()
 
-	// Create user if not exists
 	if _, err := h.DB.FindOrCreateUser(r.Context(), email); err != nil {
 		log.Printf("FindOrCreateUser error: %v", err)
 		writeJSON(w, http.StatusOK, map[string]string{"message": "if this email exists, a link has been sent"})
 		return
 	}
 
-	// Generate magic link token
 	magicToken, err := tokens.GenerateMagicToken(email, os.Getenv("JWT_SECRET"))
 	if err != nil {
 		log.Printf("GenerateMagicToken error: %v", err)
@@ -72,7 +69,6 @@ func (h *Handler) RequestLogin(w http.ResponseWriter, r *http.Request) {
 		log.Printf("SendMagicLink error: %v", err)
 	}
 
-	// Always same response (no enumeration)
 	writeJSON(w, http.StatusOK, map[string]string{"message": "if this email exists, a link has been sent"})
 }
 
@@ -96,7 +92,6 @@ func (h *Handler) Login(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Generate device token
 	deviceToken, tokenHash, err := tokens.GenerateDeviceToken()
 	if err != nil {
 		http.Error(w, "internal error", http.StatusInternalServerError)
@@ -116,7 +111,7 @@ func (h *Handler) Login(w http.ResponseWriter, r *http.Request) {
 
 	writeJSON(w, http.StatusOK, map[string]string{
 		"device_token": deviceToken,
-		"user_id":      user.ID.String(),
+		"user_id":      user.ID,
 	})
 }
 
@@ -130,10 +125,10 @@ func (h *Handler) Logout(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, map[string]string{"message": "logged out"})
 }
 
-// GET /auth/me — example protected route
+// GET /auth/me
 func (h *Handler) Me(w http.ResponseWriter, r *http.Request) {
 	userID := authmw.GetUserID(r.Context())
 	writeJSON(w, http.StatusOK, map[string]string{
-		"user_id": userID.String(),
+		"user_id": userID,
 	})
 }

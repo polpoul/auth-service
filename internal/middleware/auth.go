@@ -5,7 +5,6 @@ import (
 	"net/http"
 	"strings"
 
-	"github.com/google/uuid"
 	"github.com/you/auth-service/internal/db"
 	"github.com/you/auth-service/internal/tokens"
 )
@@ -33,7 +32,6 @@ func RequireAuth(database *db.DB) func(http.Handler) http.Handler {
 				return
 			}
 
-			// Update last_seen asynchronously (non-blocking)
 			go func() {
 				_ = database.UpdateLastSeen(context.Background(), tokenHash)
 			}()
@@ -45,13 +43,11 @@ func RequireAuth(database *db.DB) func(http.Handler) http.Handler {
 	}
 }
 
-// GetUserID extracts authenticated user ID from context.
-func GetUserID(ctx context.Context) uuid.UUID {
-	id, _ := ctx.Value(ContextUserID).(uuid.UUID)
+func GetUserID(ctx context.Context) string {
+	id, _ := ctx.Value(ContextUserID).(string)
 	return id
 }
 
-// GetTokenHash extracts the current device token hash from context.
 func GetTokenHash(ctx context.Context) string {
 	h, _ := ctx.Value(ContextTokenHash).(string)
 	return h

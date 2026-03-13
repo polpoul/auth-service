@@ -1,114 +1,130 @@
-package db
+﻿package db
 
 import (
-	"context"
-	"time"
+"context"
+"database/sql"
+"fmt"
+"time"
 
-	"github.com/google/uuid"
-	"github.com/jackc/pgx/v5/pgxpool"
+_ "github.com/go-sql-driver/mysql"
+"github.com/google/uuid"
 )
 
 type DB struct {
-	Pool *pgxpool.Pool
+conn *sql.DB
 }
 
-func New(ctx context.Context, dsn string) (*DB, error) {
-	pool, err := pgxpool.New(ctx, dsn)
-	if err != nil {
-		return nil, err
-	}
-	if err := pool.Ping(ctx); err != nil {
-		return nil, err
-	}
-	return &DB{Pool: pool}, nil
+func New(dsn string) (*DB, error) {
+conn, err := sql.Open("mysql", dsn)
+if err != nil {
+return nil, fmt.Errorf("failed to open database: %w", err)
+}
+conn.SetMaxOpenConns(10)
+conn.SetMaxIdleConns(5)
+conn.SetConnMaxLifetime(5 * time.Minute)
+if err := conn.Ping(); err != nil {
+return nil, fmt.Errorf("failed to ping database: %w", err)
+}
+return &DB{conn: conn}, nil
 }
 
-// --- Users ---
+func (d *DB) Close() {
+_ = d.conn.Close()
+}
 
 type User struct {
-	ID        uuid.UUID
-	Email     string
-	CreatedAt time.Time
+ID        string
+Email     string
+CreatedAt time.Time
 }
 
-// FindOrCreateUser returns existing user or creates one.
 func (d *DB) FindOrCreateUser(ctx context.Context, email string) (*User, error) {
-	u := &User{}
-	err := d.Pool.QueryRow(ctx, `
-		INSERT INTO users (id, email)
-		VALUES (gen_random_uuid(), $1)
-		ON CONFLICT (email) DO UPDATE SET email = EXCLUDED.email
-		RETURNING id, email, created_at
-	`, email).Scan(&u.ID, &u.Email, &u.CreatedAt)
-	return u, err
+id := uuid.New().String()
+_, err := d.conn.ExecContext(ctx, `
+INSERT INTO users (id, email)
+VALUES (?, ?)
+ON DUPLICATE KEY UPDATE email = email
+`, id, email)
+if err != nil {
+return nil, err
+}
+return d.FindUserByEmail(ctx, email)
 }
 
 func (d *DB) FindUserByEmail(ctx context.Context, email string) (*User, error) {
-	u := &User{}
-	err := d.Pool.QueryRow(ctx, `
-		SELECT id, email, created_at FROM users WHERE email = $1
-	`, email).Scan(&u.ID, &u.Email, &u.CreatedAt)
-	return u, err
+u := &User{}
+err := d.conn.QueryRowContext(ctx, `
+SELECT id, email, created_at FROM users WHERE email = ?
+`, email).Scan(&u.ID, &u.Email, &u.CreatedAt)
+if err != nil {
+return nil, err
 }
-
-// --- Devices ---
+return u, nil
+}
 
 type Device struct {
-	ID         uuid.UUID
-	UserID     uuid.UUID
-	TokenHash  string
-	DeviceName *string
-	CreatedAt  time.Time
-	LastSeen   *time.Time
-	Revoked    bool
+ID         string
+UserID     string
+TokenHash  string
+DeviceName *string
+CreatedAt  time.Time
+LastSeen   *time.Time
+Revoked    bool
 }
 
-func (d *DB) CreateDevice(ctx context.Context, userID uuid.UUID, tokenHash string, deviceName *string) (*Device, error) {
-	dev := &Device{}
-	err := d.Pool.QueryRow(ctx, `
-		INSERT INTO devices (id, user_id, token_hash, device_name)
-		VALUES (gen_random_uuid(), $1, $2, $3)
-		RETURNING id, user_id, token_hash, device_name, created_at, last_seen, revoked
-	`, userID, tokenHash, deviceName).Scan(
-		&dev.ID, &dev.UserID, &dev.TokenHash,
-		&dev.DeviceName, &dev.CreatedAt, &dev.LastSeen, &dev.Revoked,
-	)
-	return dev, err
+func (d *DB) CreateDevice(ctx context.Context, userID, tokenHash string, deviceName *string) (*Device, error) {
+id := uuid.New().String()
+_, err := d.conn.ExecContext(ctx, `
+INSERT INTO devices (id, user_id, token_hash, device_name)
+VALUES (?, ?, ?, ?)
+`, id, userID, tokenHash, deviceName)
+if err != nil {
+return nil, err
+}
+return &Device{
+ID:         id,
+UserID:     userID,
+TokenHash:  tokenHash,
+DeviceName: deviceName,
+CreatedAt:  time.Now(),
+}, nil
 }
 
 func (d *DB) FindDeviceByTokenHash(ctx context.Context, tokenHash string) (*Device, error) {
-	dev := &Device{}
-	err := d.Pool.QueryRow(ctx, `
-		SELECT id, user_id, token_hash, device_name, created_at, last_seen, revoked
-		FROM devices
-		WHERE token_hash = $1 AND revoked = false
-	`, tokenHash).Scan(
-		&dev.ID, &dev.UserID, &dev.TokenHash,
-		&dev.DeviceName, &dev.CreatedAt, &dev.LastSeen, &dev.Revoked,
-	)
-	return dev, err
+dev := &Device{}
+err := d.conn.QueryRowContext(ctx, `
+SELECT id, user_id, token_hash, device_name, created_at, last_seen, revoked
+FROM devices
+WHERE token_hash = ? AND revoked = 0
+`, tokenHash).Scan(
+&dev.ID, &dev.UserID, &dev.TokenHash,
+&dev.DeviceName, &dev.CreatedAt, &dev.LastSeen, &dev.Revoked,
+)
+if err != nil {
+return nil, err
+}
+return dev, nil
 }
 
 func (d *DB) UpdateLastSeen(ctx context.Context, tokenHash string) error {
-	_, err := d.Pool.Exec(ctx, `
-		UPDATE devices SET last_seen = now() WHERE token_hash = $1
-	`, tokenHash)
-	return err
+_, err := d.conn.ExecContext(ctx, `
+UPDATE devices SET last_seen = NOW() WHERE token_hash = ?
+`, tokenHash)
+return err
 }
 
 func (d *DB) RevokeDevice(ctx context.Context, tokenHash string) error {
-	_, err := d.Pool.Exec(ctx, `
-		UPDATE devices SET revoked = true WHERE token_hash = $1
-	`, tokenHash)
-	return err
+_, err := d.conn.ExecContext(ctx, `
+UPDATE devices SET revoked = 1 WHERE token_hash = ?
+`, tokenHash)
+return err
 }
 
-// CleanupInactiveDevices removes devices inactive for more than 90 days.
 func (d *DB) CleanupInactiveDevices(ctx context.Context) error {
-	_, err := d.Pool.Exec(ctx, `
-		DELETE FROM devices
-		WHERE (last_seen IS NULL AND created_at < now() - INTERVAL '90 days')
-		   OR last_seen < now() - INTERVAL '90 days'
-	`)
-	return err
+_, err := d.conn.ExecContext(ctx, `
+DELETE FROM devices
+WHERE (last_seen IS NULL AND created_at < NOW() - INTERVAL 90 DAY)
+   OR last_seen < NOW() - INTERVAL 90 DAY
+`)
+return err
 }
