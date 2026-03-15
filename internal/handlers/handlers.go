@@ -1,4 +1,4 @@
-package handlers
+﻿package handlers
 
 import (
 	"encoding/json"
@@ -63,7 +63,7 @@ func (h *Handler) RequestLogin(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	magicURL := fmt.Sprintf("%s/auth/login?token=%s", os.Getenv("APP_URL"), magicToken)
+	magicURL := fmt.Sprintf("%s?token=%s", os.Getenv("APP_URL"), magicToken)
 
 	if err := h.Mailer.SendMagicLink(email, magicURL); err != nil {
 		log.Printf("SendMagicLink error: %v", err)
