@@ -29,7 +29,8 @@ func writeJSON(w http.ResponseWriter, status int, v any) {
 // POST /auth/request-login
 func (h *Handler) RequestLogin(w http.ResponseWriter, r *http.Request) {
 	var body struct {
-		Email string `json:"email"`
+		Email       string `json:"email"`
+		RedirectURL string `json:"redirect_url"`
 	}
 	if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
 		http.Error(w, "invalid body", http.StatusBadRequest)
@@ -63,7 +64,11 @@ func (h *Handler) RequestLogin(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	magicURL := fmt.Sprintf("%s?token=%s", os.Getenv("APP_URL"), magicToken)
+	appURL := body.RedirectURL
+	if appURL == "" {
+		appURL = os.Getenv("APP_URL")
+	}
+	magicURL := fmt.Sprintf("%s?token=%s", appURL, magicToken)
 
 	if err := h.Mailer.SendMagicLink(email, magicURL); err != nil {
 		log.Printf("SendMagicLink error: %v", err)
