@@ -26,7 +26,7 @@ func writeJSON(w http.ResponseWriter, status int, v any) {
 	_ = json.NewEncoder(w).Encode(v)
 }
 
-// POST /auth/request-login
+// POST /auth/request-login .
 func (h *Handler) RequestLogin(w http.ResponseWriter, r *http.Request) {
 	var body struct {
 		Email       string `json:"email"`
