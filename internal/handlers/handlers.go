@@ -1,4 +1,4 @@
-﻿package handlers
+package handlers
 
 import (
 	"encoding/json"
@@ -9,6 +9,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/you/auth-service/internal/allowlist"
 	"github.com/you/auth-service/internal/db"
 	"github.com/you/auth-service/internal/mailer"
 	authmw "github.com/you/auth-service/internal/middleware"
@@ -16,8 +17,9 @@ import (
 )
 
 type Handler struct {
-	DB     *db.DB
-	Mailer *mailer.Mailer
+	DB        *db.DB
+	Mailer    *mailer.Mailer
+	Allowlist allowlist.Allowlist
 }
 
 func writeJSON(w http.ResponseWriter, status int, v any) {
@@ -26,17 +28,17 @@ func writeJSON(w http.ResponseWriter, status int, v any) {
 	_ = json.NewEncoder(w).Encode(v)
 }
 
-// POST /auth/request-login .
+// POST /auth/request-login
 func (h *Handler) RequestLogin(w http.ResponseWriter, r *http.Request) {
 	var body struct {
 		Email       string `json:"email"`
 		RedirectURL string `json:"redirect_url"`
+		App         string `json:"app"`
 	}
 	if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
 		http.Error(w, "invalid body", http.StatusBadRequest)
 		return
 	}
-
 	email := strings.ToLower(strings.TrimSpace(body.Email))
 	if email == "" || !strings.Contains(email, "@") {
 		http.Error(w, "invalid email", http.StatusBadRequest)
@@ -50,6 +52,21 @@ func (h *Handler) RequestLogin(w http.ResponseWriter, r *http.Request) {
 			time.Sleep(min - elapsed)
 		}
 	}()
+
+	// Vérification allowlist
+	if !h.Allowlist.IsAllowed(email, body.App) {
+		go func() {
+			adminEmail := os.Getenv("ADMIN_EMAIL")
+			if adminEmail == "" {
+				adminEmail = "deleupa@gmail.com"
+			}
+			if err := h.Mailer.SendAccessDeniedNotification(email, body.App, adminEmail); err != nil {
+				log.Printf("SendAccessDeniedNotification error: %v", err)
+			}
+		}()
+		writeJSON(w, http.StatusForbidden, map[string]string{"error": "access denied"})
+		return
+	}
 
 	if _, err := h.DB.FindOrCreateUser(r.Context(), email); err != nil {
 		log.Printf("FindOrCreateUser error: %v", err)
