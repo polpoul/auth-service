@@ -19,7 +19,7 @@ import (
 type Handler struct {
 	DB        *db.DB
 	Mailer    *mailer.Mailer
-	Allowlist allowlist.Allowlist
+	Allowlist *allowlist.Allowlist // pointeur, peut être nil si pas de restriction
 }
 
 func writeJSON(w http.ResponseWriter, status int, v any) {
@@ -53,7 +53,7 @@ func (h *Handler) RequestLogin(w http.ResponseWriter, r *http.Request) {
 		}
 	}()
 
-	// Vérification allowlist
+	// Vérification allowlist — relit le fichier à chaque requête
 	if !h.Allowlist.IsAllowed(email, body.App) {
 		go func() {
 			adminEmail := os.Getenv("ADMIN_EMAIL")
