@@ -19,7 +19,6 @@ import (
 	"github.com/you/auth-service/internal/mailer"
 )
 
-// corsMiddleware autorise les appels cross-origin depuis les domaines configurés.
 func corsMiddleware(allowedOrigins string) func(http.Handler) http.Handler {
 	origins := strings.Split(allowedOrigins, ",")
 	return func(next http.Handler) http.Handler {
@@ -52,7 +51,6 @@ func main() {
 	}
 	defer database.Close()
 
-	// Nettoyage automatique des sessions inactives
 	go func() {
 		ticker := time.NewTicker(24 * time.Hour)
 		for range ticker.C {
@@ -62,13 +60,14 @@ func main() {
 		}
 	}()
 
-	// Chargement de l'allowlist
+	// Chargement de l'allowlist — retourne un *Allowlist (pointeur)
+	// La vérification relit le fichier à chaque requête (hot reload)
 	al, err := allowlist.Load(os.Getenv("ALLOWLIST_PATH"))
 	if err != nil {
 		log.Fatalf("failed to load allowlist: %v", err)
 	}
 	if al != nil {
-		log.Printf("allowlist loaded: %d emails", len(al))
+		log.Printf("allowlist configured at: %s (hot reload enabled)", os.Getenv("ALLOWLIST_PATH"))
 	} else {
 		log.Printf("no allowlist configured, all emails allowed")
 	}
@@ -76,10 +75,9 @@ func main() {
 	h := &handlers.Handler{
 		DB:        database,
 		Mailer:    mailer.New(),
-		Allowlist: al,
+		Allowlist: al, // *allowlist.Allowlist — nil si pas de fichier configuré
 	}
 
-	// CORS_ORIGINS = liste des origines autorisées séparées par virgule
 	allowedOrigins := os.Getenv("CORS_ORIGINS")
 	if allowedOrigins == "" {
 		allowedOrigins = "https://vivalink.top"
