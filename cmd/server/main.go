@@ -97,6 +97,7 @@ func main() {
 	r.Group(func(r chi.Router) {
 		r.Use(httprate.LimitByIP(5, time.Minute))
 		r.Post("/auth/request-login", h.RequestLogin)
+		r.Post("/auth/instant-login", h.InstantLogin)
 		r.Get("/auth/login", h.Login)
 	})
 
