@@ -137,6 +137,68 @@ func (h *Handler) Login(w http.ResponseWriter, r *http.Request) {
 	})
 }
 
+// POST /auth/instant-login
+func (h *Handler) InstantLogin(w http.ResponseWriter, r *http.Request) {
+	var body struct {
+		Email string `json:"email"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+		http.Error(w, "invalid body", http.StatusBadRequest)
+		return
+	}
+	email := strings.ToLower(strings.TrimSpace(body.Email))
+	if email == "" || !strings.Contains(email, "@") {
+		http.Error(w, "invalid email", http.StatusBadRequest)
+		return
+	}
+
+	instantEmails := os.Getenv("INSTANT_LOGIN_EMAILS")
+	if instantEmails == "" {
+		writeJSON(w, http.StatusForbidden, map[string]string{"error": "instant login not available"})
+		return
+	}
+	allowed := false
+	for _, e := range strings.Split(instantEmails, ",") {
+		if strings.TrimSpace(strings.ToLower(e)) == email {
+			allowed = true
+			break
+		}
+	}
+	if !allowed {
+		writeJSON(w, http.StatusForbidden, map[string]string{"error": "instant login not available"})
+		return
+	}
+
+	user, err := h.DB.FindOrCreateUser(r.Context(), email)
+	if err != nil {
+		log.Printf("InstantLogin FindOrCreateUser error: %v", err)
+		http.Error(w, "internal error", http.StatusInternalServerError)
+		return
+	}
+
+	deviceToken, tokenHash, err := tokens.GenerateDeviceToken()
+	if err != nil {
+		http.Error(w, "internal error", http.StatusInternalServerError)
+		return
+	}
+
+	deviceName := r.UserAgent()
+	if deviceName == "" {
+		deviceName = "unknown"
+	}
+
+	if _, err := h.DB.CreateDevice(r.Context(), user.ID, tokenHash, &deviceName); err != nil {
+		log.Printf("InstantLogin CreateDevice error: %v", err)
+		http.Error(w, "internal error", http.StatusInternalServerError)
+		return
+	}
+
+	writeJSON(w, http.StatusOK, map[string]string{
+		"device_token": deviceToken,
+		"user_id":      user.ID,
+	})
+}
+
 // POST /auth/logout
 func (h *Handler) Logout(w http.ResponseWriter, r *http.Request) {
 	tokenHash := authmw.GetTokenHash(r.Context())
