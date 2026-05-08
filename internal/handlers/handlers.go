@@ -153,21 +153,27 @@ func (h *Handler) InstantLogin(w http.ResponseWriter, r *http.Request) {
 	}
 
 	instantEmails := os.Getenv("INSTANT_LOGIN_EMAILS")
+	log.Printf("InstantLogin: email=%q INSTANT_LOGIN_EMAILS=%q", email, instantEmails)
 	if instantEmails == "" {
+		log.Printf("InstantLogin: variable INSTANT_LOGIN_EMAILS absente ou vide")
 		writeJSON(w, http.StatusForbidden, map[string]string{"error": "instant login not available"})
 		return
 	}
 	allowed := false
 	for _, e := range strings.Split(instantEmails, ",") {
-		if strings.TrimSpace(strings.ToLower(e)) == email {
+		candidate := strings.TrimSpace(strings.ToLower(e))
+		log.Printf("InstantLogin: comparaison %q == %q -> %v", email, candidate, email == candidate)
+		if candidate == email {
 			allowed = true
 			break
 		}
 	}
 	if !allowed {
+		log.Printf("InstantLogin: email %q non autorisé", email)
 		writeJSON(w, http.StatusForbidden, map[string]string{"error": "instant login not available"})
 		return
 	}
+	log.Printf("InstantLogin: email %q autorisé, création du device token", email)
 
 	user, err := h.DB.FindOrCreateUser(r.Context(), email)
 	if err != nil {
