@@ -81,9 +81,14 @@ func (h *Handler) RequestLogin(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	appURL := body.RedirectURL
-	if appURL == "" {
-		appURL = os.Getenv("APP_URL")
+	appURL := os.Getenv("APP_URL")
+	if body.RedirectURL != "" {
+		for _, origin := range strings.Split(os.Getenv("CORS_ORIGINS"), ",") {
+			if strings.HasPrefix(body.RedirectURL, strings.TrimSpace(origin)) {
+				appURL = body.RedirectURL
+				break
+			}
+		}
 	}
 	magicURL := fmt.Sprintf("%s?token=%s", appURL, magicToken)
 
