@@ -12,6 +12,7 @@ import (
 	"github.com/you/auth-service/internal/allowlist"
 	"github.com/you/auth-service/internal/db"
 	"github.com/you/auth-service/internal/mailer"
+	"github.com/you/auth-service/internal/openapps"
 	authmw "github.com/you/auth-service/internal/middleware"
 	"github.com/you/auth-service/internal/tokens"
 )
@@ -20,7 +21,17 @@ type Handler struct {
 	DB        *db.DB
 	Mailer    *mailer.Mailer
 	Allowlist *allowlist.Allowlist // pointeur, peut être nil si pas de restriction
+	// OpenApps : applications qui sautent l'allowlist (voir package openapps). Nil = aucune.
+	OpenApps *openapps.Policy
+	// OpenAppLimiter : limite par adresse pour les applications ouvertes. Nil = pas de limite.
+	OpenAppLimiter *openapps.EmailLimiter
 }
+
+const genericLoginMessage = "if this email exists, a link has been sent"
+
+// appSecretHeader porte le secret partagé exigé pour une application ouverte.
+const appSecretHeader = "X-App-Secret"
+
 
 func writeJSON(w http.ResponseWriter, status int, v any) {
 	w.Header().Set("Content-Type", "application/json")
@@ -53,8 +64,21 @@ func (h *Handler) RequestLogin(w http.ResponseWriter, r *http.Request) {
 		}
 	}()
 
-	// Vérification allowlist — relit le fichier à chaque requête
-	if !h.Allowlist.IsAllowed(email, body.App) {
+	// Application ouverte : pas d'allowlist, mais réservée à l'application légitime (secret) et limitée
+	// par adresse. Une demande sans le bon secret est refusée sans rien envoyer ; une adresse qui
+	// dépasse sa limite reçoit la réponse habituelle (rien ne trahit la limite) mais aucun email.
+	if h.OpenApps.IsOpen(body.App) {
+		if !h.OpenApps.SecretOK(r.Header.Get(appSecretHeader)) {
+			writeJSON(w, http.StatusForbidden, map[string]string{"error": "forbidden"})
+			return
+		}
+		if h.OpenAppLimiter != nil && !h.OpenAppLimiter.Allow(email) {
+			log.Printf("open app %q: limite par adresse atteinte, aucun lien envoyé", body.App)
+			writeJSON(w, http.StatusOK, map[string]string{"message": genericLoginMessage})
+			return
+		}
+	} else if !h.Allowlist.IsAllowed(email, body.App) {
+		// Vérification allowlist — relit le fichier à chaque requête
 		go func() {
 			adminEmail := os.Getenv("ADMIN_EMAIL")
 			if adminEmail == "" {
@@ -223,7 +247,13 @@ func (h *Handler) Logout(w http.ResponseWriter, r *http.Request) {
 // GET /auth/me
 func (h *Handler) Me(w http.ResponseWriter, r *http.Request) {
 	userID := authmw.GetUserID(r.Context())
-	writeJSON(w, http.StatusOK, map[string]string{
-		"user_id": userID,
-	})
+	body := map[string]string{"user_id": userID}
+	// Email ajouté pour le portail (relier la connexion à la fiche stagiaire). Champ en plus : les
+	// clients existants ne lisent que user_id. Un échec de lecture ne casse pas l'authentification.
+	if user, err := h.DB.FindUserByID(r.Context(), userID); err == nil {
+		body["email"] = user.Email
+	} else {
+		log.Printf("Me: FindUserByID error: %v", err)
+	}
+	writeJSON(w, http.StatusOK, body)
 }

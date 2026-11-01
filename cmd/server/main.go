@@ -17,6 +17,7 @@ import (
 	"github.com/you/auth-service/internal/handlers"
 	authmw "github.com/you/auth-service/internal/middleware"
 	"github.com/you/auth-service/internal/mailer"
+	"github.com/you/auth-service/internal/openapps"
 )
 
 func corsMiddleware(allowedOrigins string) func(http.Handler) http.Handler {
@@ -72,10 +73,22 @@ func main() {
 		log.Printf("no allowlist configured, all emails allowed")
 	}
 
+	// Applications ouvertes (allowlist sautée) : refusé au démarrage si OPEN_APPS est défini sans secret.
+	open, err := openapps.Parse(os.Getenv("OPEN_APPS"), os.Getenv("OPEN_APP_SECRET"))
+	if err != nil {
+		log.Fatalf("invalid open apps configuration: %v", err)
+	}
+	if os.Getenv("OPEN_APPS") != "" {
+		log.Printf("open apps (allowlist skipped, secret required): %s", os.Getenv("OPEN_APPS"))
+	}
+
 	h := &handlers.Handler{
 		DB:        database,
 		Mailer:    mailer.New(),
 		Allowlist: al, // *allowlist.Allowlist — nil si pas de fichier configuré
+		OpenApps:  open,
+		// 3 liens par heure et par adresse pour les applications ouvertes.
+		OpenAppLimiter: openapps.NewEmailLimiter(3, time.Hour),
 	}
 
 	allowedOrigins := os.Getenv("CORS_ORIGINS")

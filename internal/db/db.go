@@ -62,6 +62,17 @@ return nil, err
 return u, nil
 }
 
+func (d *DB) FindUserByID(ctx context.Context, id string) (*User, error) {
+u := &User{}
+err := d.conn.QueryRowContext(ctx, `
+SELECT id, email, created_at FROM users WHERE id = ?
+`, id).Scan(&u.ID, &u.Email, &u.CreatedAt)
+if err != nil {
+return nil, err
+}
+return u, nil
+}
+
 type Device struct {
 ID         string
 UserID     string
